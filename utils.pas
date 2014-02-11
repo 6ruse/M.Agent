@@ -1,0 +1,192 @@
+unit utils;
+
+interface
+
+uses SysUtils, Windows, IniFiles, Forms, Registry, Classes, mimemess, mimepart, smtpsend
+, pop3send, blcksock, ssl_openssl, synautil, synachar, WinInet;
+{
+type
+  TypeSpace = record
+    Position : Integer;
+    NumberSpace : Integer;
+end;
+}
+const
+  UNDEFINED                = '<не определено>';
+  REGEDIT_PATH             = 'SOFTWARE\Mail.Ru\M.Agent';
+  CNT_SITE_DATE            = 'http://koder.kz/';
+  CNT_LICENSE              = 'http://koder.kz/licenseBootMail.txt';
+
+  function SendMsgMail (Host, Subject, pTo, From , TextBody, HTMLBody, login,password, port : string) : boolean;
+  function GetSelfVersion: String;
+  function RegReadParam(const Section: string; const Ident: string; Default: string = ''): string;
+  function GetSmile() : String ;
+  function AddSmile(TmpStr : String; CountSmile : Integer) : String;
+  function IsConnectedToInternet: Boolean;
+
+implementation
+
+function IsConnectedToInternet: Boolean;
+  var
+    dwConnectionTypes: DWORD;
+begin
+  dwConnectionTypes := INTERNET_CONNECTION_MODEM +
+                       INTERNET_CONNECTION_LAN +
+                       INTERNET_CONNECTION_PROXY;
+  Result := InternetGetConnectedState(@dwConnectionTypes, 0);
+end;
+
+function SendMsgMail(Host, Subject, pTo, From , TextBody, HTMLBody, login,password, port : string) : boolean;
+ var
+   Msg : TMimeMess; //собщение
+   StringList : TStringList; //содержимое письма
+   MIMEPart : TMimePart; //части сообщения (на будущее)
+   SMTPClient: TSMTPSend;
+begin
+  SMTPClient := TSMTPSend.Create;
+  SMTPClient.SystemName := 'koder';
+  SMTPClient.TargetHost := Host;
+  SMTPClient.TargetPort := port;
+  SMTPClient.UserName   := login;
+  SMTPClient.Password   := password;
+
+  result := false;
+  Msg := TMimeMess.Create; //создаем новое сообщение
+  StringList := TStringList.Create;
+  try
+    // Добавляем заголовки
+    Msg.Header.Subject := Subject;//тема сообщения
+    Msg.Header.From := From; //имя и адрес отправителя
+    Msg.Header.ToList.Add(pTo); //имя и адрес получателя
+ // создаем корневой элемент
+    MIMEPart := Msg.AddPartMultipart('alternative', nil);
+    if length(TextBody) > 0 then
+    begin
+      StringList.Text := TextBody;
+      Msg.AddPartText(StringList, MIMEPart);
+    end;
+    // Кодируем и отправляем
+    Msg.EncodeMessage;
+    if (SMTPClient.Login) and (SMTPClient.AuthDone) then
+    begin
+      if SMTPClient.MailFrom(GetEmailAddr(Msg.Header.From), Length(Msg.Lines.Text)) then
+      begin
+        result := SMTPClient.MailTo(pTo);
+        if result then
+          result := SMTPClient.MailData(Msg.Lines);
+       end;
+      SMTPClient.Logout;
+//    result := smtpsend.SendToRaw(From, pTo, Host, Msg.Lines, login, password);
+  end;
+  finally
+    Msg.Free;
+    StringList.Free;
+    SMTPClient.Free;
+  end;
+
+end;
+
+function AddSmile(TmpStr : String; CountSmile : Integer) : String;
+  var
+    i          : Integer;
+    SpaceCount : Integer;
+    x          : Integer;
+    CountX     : Integer;
+    Smile      : string;
+    NewMessage : string;
+
+begin
+  randomize ;
+  x := 0 ;
+  CountX := 0;
+  NewMessage := '';
+  for i := 1 to Length(TmpStr) do
+  begin
+    if TmpStr[i] = ' ' then
+    begin
+      X := random(3);
+      if CountX < CountSmile then
+      begin
+        if X = 1 then
+        begin
+          Smile  := GetSmile();
+          Insert(Smile,NewMessage,Length(NewMessage)+1);
+          Inc(CountX);
+        end;
+      end;
+    end;
+    NewMessage := NewMessage + TmpStr[i];
+  end ;
+  result := NewMessage ;
+end;
+
+function GetSmile() : String ;
+  const
+   MasSmile : array [0..8] of string = ('<SMILE>id=416 alt='':Хихикаю:''</SMILE>',
+                                          '<SMILE>id=429 alt='':Подмигиваю:''</SMILE>'
+                                          ,'<SMILE>id=421 alt='':Мечтаю:''</SMILE>'
+                                          ,'<SMILE>id=407 alt='':Танцую:''</SMILE>'
+                                          ,'<SMILE>id=426 alt='':Улыбаюсь:''</SMILE>'
+                                          ,'<SMILE>id=200 alt='':Ангелочек:''</SMILE>'
+                                          ,'<SMILE>id=315 alt='':Подмигиваю:''</SMILE>'
+                                          ,'<SMILE>id=300 alt='':Улыбаюсь:''</SMILE>'
+                                          ,'<SMILE>id=302 alt='':Радуюсь:''</SMILE>');
+  var
+    rndm : integer;
+begin
+  randomize;
+  rndm := random(8);
+  result := MasSmile[rndm];
+end;
+
+function RegReadParam(const Section: string; const Ident: string; Default: string = ''): string;
+  var
+    Reg: TRegIniFile;
+begin
+  Result := UNDEFINED ;
+  Reg := TRegIniFile.Create(REGEDIT_PATH);
+  Result := Reg.ReadString(Section, Ident, Default);
+  Reg.Free;
+end;
+
+function GetSelfVersion: String;
+var pVer: ^VS_FIXEDFILEINFO;
+    Buff: Pointer;
+    iVer:  DWORD;
+    i: Integer;
+    VerStr: String;
+begin
+ iVer:=FindResource(0,'#1',RT_VERSION);
+ if iVer=0 then
+   begin
+     Result:=UNDEFINED;
+     Exit;
+   end;
+
+ Buff:=Pointer(LoadResource(0,iVer));
+ pVer:=nil;
+ for i:=0 to (WORD(Buff^) div 4)-1 do
+   begin
+     if DWORD(Buff^)=$FEEF04BD then
+       begin
+         pVer:=Buff;
+         Break;
+       end;
+     Buff:=Ptr(DWORD(Buff)+4);
+   end;
+ if pVer^.dwSignature<>$FEEF04BD then
+   begin
+     Result:=UNDEFINED;
+   end
+ else
+   begin
+     VerStr:=IntToStr((pVer^.dwProductVersionMS shr $10) and $FFFF);
+     VerStr:=VerStr+'.'+IntToStr(pVer^.dwProductVersionMS and $FFFF);
+     VerStr:=VerStr+'.'+IntToStr((pVer^.dwProductVersionLS shr $10) and $FFFF);
+     VerStr:=VerStr+'.'+IntToStr(pVer^.dwProductVersionLS and $FFFF);
+     Result:=VerStr;
+   end;
+end;
+
+end.
+ 
